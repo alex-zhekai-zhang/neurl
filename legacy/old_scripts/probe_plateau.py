@@ -17,7 +17,7 @@ import argparse
 import numpy as np
 import torch
 
-from remap_lunar import CKPT_DIR, SWAPPED, Policy, discounted_returns, make_env
+from legacy.old_scripts.remap_lunar import CKPT_DIR, SWAPPED, Policy, discounted_returns, make_env
 
 SIGMAS = [0.01, 0.03, 0.1, 0.3]
 
