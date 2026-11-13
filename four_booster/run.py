@@ -7,6 +7,8 @@
 Tasks
     booster    lunar_booster.py: the left angled booster is weakened for part of training (BOOSTER_* below)
     2landing   lunar_2landing.py: two pads, +100 and -100; which pad is good can switch (PAD_* below)
+    tethered   lunar_tethered.py: two landers joined by a rope, one Agent each (see run_tethered.py);
+               default run_tethered.EPISODES episodes; no episodes.json (the viewer is single-lander), final.gif instead
 
 Outputs go to outputs/<task>_<model>/: checkpoints, returns.png, and episodes.json for ../view_episodes.py.
 """
@@ -26,6 +28,7 @@ from episode_recorder import EpisodeRecorder  # noqa: E402
 
 import lunar_2landing  # noqa: E402
 import lunar_booster  # noqa: E402
+import run_tethered  # noqa: E402
 
 SUITE_NAME = "4 boosters"
 EPISODES = 9000
@@ -86,6 +89,7 @@ def pad_schedule(episodes):
 TASKS = {
     "booster": (lunar_booster.LunarLander, booster_schedule),
     "2landing": (lunar_2landing.LunarLander, pad_schedule),
+    "tethered": (None, None),  # trained by run_tethered.train
 }
 MODELS = sorted(p.stem for p in (HERE / "models").glob("*.py") if p.stem != "__init__")
 
@@ -106,20 +110,29 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--suite", nargs="+", default=["all"], choices=["all", *TASKS], help="tasks to run (default: all)")
     ap.add_argument("--model", default="mlp", choices=MODELS)
-    ap.add_argument("--episodes", type=int, default=EPISODES)
+    ap.add_argument("--episodes", type=int, default=None,
+                    help=f"default: {EPISODES}; tethered: {run_tethered.EPISODES}")
     args = ap.parse_args()
 
     tasks = list(TASKS) if "all" in args.suite else list(dict.fromkeys(args.suite))
     model = importlib.import_module(f"models.{args.model}")
     for task in tasks:
         make_env, make_schedule = TASKS[task]
-        print(f"=== {SUITE_NAME} · {task} · {args.model} ({args.episodes} episodes)")
+        episodes = args.episodes or (run_tethered.EPISODES if task == "tethered" else EPISODES)
+        title = f"{SUITE_NAME} · {task} · {args.model}"
+        print(f"=== {title} ({episodes} episodes)")
+        out = HERE / "outputs" / f"{task}_{args.model}"
+        if task == "tethered":
+            if not hasattr(model, "Agent"):
+                raise SystemExit(f"models/{args.model}.py has no Agent class; tethered needs one per lander")
+            run_tethered.train(model, episodes, out, title)
+            print(f"saved {out.relative_to(HERE.parent)}/")
+            continue
         # gym.make adds a 1000-step TimeLimit; constructing the class directly does not
         env = gym.wrappers.TimeLimit(make_env(continuous=True), max_episode_steps=1000)
-        out = HERE / "outputs" / f"{task}_{args.model}"
-        recorder = EpisodeRecorder(out / "episodes.json", env, run=f"{SUITE_NAME} · {task} · {args.model}",
-                                   every=RECORD_EVERY, last_episode=args.episodes - 1)
-        changes, inner = [], make_schedule(args.episodes)
+        recorder = EpisodeRecorder(out / "episodes.json", env, run=title,
+                                   every=RECORD_EVERY, last_episode=episodes - 1)
+        changes, inner = [], make_schedule(episodes)
 
         def schedule(env_u, episode, inner=inner, changes=changes):
             msg = inner(env_u, episode)
@@ -127,8 +140,8 @@ def main():
                 changes.append(episode)
             return msg
 
-        returns = model.train(env, args.episodes, schedule, recorder, out)
-        plot_returns(returns, changes, out / "returns.png", f"{SUITE_NAME} · {task} · {args.model}")
+        returns = model.train(env, episodes, schedule, recorder, out)
+        plot_returns(returns, changes, out / "returns.png", title)
         env.close()
         print(f"saved {out.relative_to(HERE.parent)}/")
 
